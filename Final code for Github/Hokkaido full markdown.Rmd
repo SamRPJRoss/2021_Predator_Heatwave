@@ -1,0 +1,1535 @@
+---
+title: Predators mitigate the destabilizing effects of heatwaves on multitrophic stream
+  communities
+author: "Samuel R.P-J. Ross"
+date: "15/06/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+##-- packages --##
+require(tidyverse)
+require(patchwork)
+require(vegan)
+require(orddom)
+require(MuMIn)
+require(scales)
+
+##-- functions --##
+'%!in%'<-function(x,y)!('%in%'(x,y)) # function for opposite of %in%
+
+##-- data --##
+Bentho<-read_csv('Data/Algae time series.csv',col_names = T)
+C.Comp<-read_csv('Data/Macroinvertebrates.csv',col_names = T)
+Leaf<-read_csv('Data/Leaf litter.csv',col_names = T)
+Treat96<-read_csv('Data/Treatments_96.csv',col_names = T)
+Treat140<-read_csv('Data/Treatments_140.csv',col_names = T)
+
+##-- pre-process data --##
+
+# convert column 1 to date format
+Bentho$Date<-parse_datetime(as.character(Bentho$Date), "%d/%m/%Y",locale = locale(tz = "Japan"))
+
+# set factor levels for heat and predator treatments
+Bentho$Pred.Treatment<-parse_factor(x = as.character(Bentho$Pred.Treatment),
+                                    ordered = T,
+                                    include_na = F,
+                                    levels = c("Present","Absent"))
+
+C.Comp$Pred.Treatment<-parse_factor(x = as.character(C.Comp$Pred.Treatment),
+                                    ordered = T,
+                                    include_na = F,
+                                    levels = c("Present","Absent"))
+
+Bentho$Heat.Treatment<-parse_factor(x = as.character(Bentho$Heat.Treatment),
+                                    ordered = T,
+                                    include_na = F,
+                                    levels = c("Ambient","Current","Future"))
+
+C.Comp$Heat.Treatment<-parse_factor(x = as.character(C.Comp$Heat.Treatment),
+                                    ordered = T,
+                                    include_na = F,
+                                    levels = c("Ambient","Current","Future"))
+
+Bentho$Period<-parse_factor(Bentho$Period, 
+                            levels = c("Initial","Heatwave","Recovery",
+                                       "Ambient","Ambient.1","Ambient.2"),
+                            ordered = T, 
+                            include_na = F)
+
+Bentho$Rep<-as.character(Bentho$Rep)
+
+```
+
+This Markdown is for reproducing the analysis from Ross _et al._ (Submitted, _Journal Name_). We have loaded all required data and will test whether heatwaves and predator presence/absence affect multiple aspects of multitrophic stream mesocosm communities. First we'll look for treatment effects on algal biomass and functional stability (temporal and spatial variability), then on compositional structure and stability (temporal and spatial variability), and finally on macroinvertebrate community structure, richness, density, and leaf litter processing by microbes and macroinvertebrates. 
+
+We will do all of this over two time periods: one during/immediately following the application of our experimental heatwaves, and one during/at the end of a 20-day recovery period (see Methods in Ross _et al._).
+
+## Functional (biomass) stability
+
+We'll start by looking for treatment effects on algal biomass and functional temporal and spatial variability. 
+
+**Mean values**
+
+First, we'll use the mean of our tiles within each measocosm to look for treatment effects on algal biomass and temporal variability. Then later we'll compare the tiles within mesocosms as our measure of spatial variability. 
+
+```{r}
+
+# Here we'll get the mean values to use for our plots. We can use $Mesocosm.No as an index to calculate across the three spatial replicates each day
+
+Bentho.Mean<-distinct(Bentho,Date,Mesocosm.No,.keep_all = TRUE) # for each date get unique date x mesocosm.no
+Bentho.Mean<-Bentho.Mean[,c(1,6:9,11)] # remove data
+Bentho.Mean<-as.data.frame(Bentho.Mean) # convert to dataframe to allow cbind
+Bentho.Mean<-cbind(Bentho.Mean,Total.Mean=NA) # cbind the mean column on
+
+# get mean of each variable for each date x mesocosm
+for (i in 1:nrow(Bentho.Mean)) {
+  Bentho.Mean$Total.Mean[i]<-mean(Bentho[Bentho$Date %in% Bentho.Mean$Date[i] & Bentho$Mesocosm.No %in%
+                                  Bentho.Mean$Mesocosm.No[i],]$Total.Conc) # get mean of total chlorophyll
+}
+  
+Bentho.Mean$Mesocosm.No<-as.character(Bentho.Mean$Mesocosm.No)
+
+# label appropriate periods
+Bentho.Mean$Period2<-NA
+Bentho.Mean$Period2[Bentho.Mean$Period %in% "Initial"]<-"Colonisation"
+Bentho.Mean$Period2[Bentho.Mean$Period %in% "Recovery"]<-"Recovery"
+Bentho.Mean$Period2[Bentho.Mean$Period %in% c("Ambient","Ambient.1","Ambient.2")]<-"Control"
+Bentho.Mean$Period2[Bentho.Mean$Date %in% parse_datetime(c("2019-07-30","2019-07-31"),locale = locale(tz = "Japan")) & 
+                      Bentho.Mean$Heat.Treatment %!in% "Ambient"]<-"Onset"
+Bentho.Mean$Period2[Bentho.Mean$Date %in% parse_datetime(c("2019-08-01","2019-08-02","2019-08-03","2019-08-04","2019-08-05"),
+                                                         locale = locale(tz = "Japan")) & 
+                      Bentho.Mean$Heat.Treatment %!in% "Ambient"]<-"Peak"
+Bentho.Mean$Period2[Bentho.Mean$Date %in% parse_datetime(c("2019-08-06","2019-08-07","2019-08-08"),
+                                                         locale = locale(tz = "Japan")) & 
+                      Bentho.Mean$Heat.Treatment %!in% "Ambient"]<-"Decline"
+
+Bentho.Mean$Period2<-parse_factor(Bentho.Mean$Period2,
+                                   levels = c("Control","Colonisation","Onset","Peak","Decline","Recovery"),
+                                   ordered = T,
+                                   include_na = F)
+```
+
+
+We'll separate out our time points on 2 specific dates: 1) the final day of peak heating, and 2) the final day of the experiment after 20-days of post-heatwave recovery.
+
+```{r}
+
+# 1) End of peak heatwave
+Peak.end<-Bentho.Mean[Bentho.Mean$Date %in% parse_datetime("2019-08-05",locale = locale(tz = "Japan")),]
+
+# 2) End of experiment
+Recovery.end<-Bentho.Mean[Bentho.Mean$Date %in% parse_datetime("2019-08-28",locale = locale(tz = "Japan")),]
+
+```
+
+
+**Treatment effects on biomass**
+
+Now we'll do the stats to test for treatment effects on algal biomass: 
+
+```{r}
+
+##-- End of Heatwave Peak --##
+# hist(Peak.end$Total.Mean) # assess normality (not run)
+summary(aov(Total.Mean~Pred.Treatment*Heat.Treatment,data = Peak.end)) # run anova
+# plot(aov(Total.Mean~Pred.Treatment*Heat.Treatment,data = Peak.end)) # check assumption of homoscedasticity (not run)
+
+##-- End of Recovery Period --##
+# hist(Recovery.end$Total.Mean) # assess normality (not run)
+summary(aov(Total.Mean~Pred.Treatment*Heat.Treatment,data = Recovery.end)) # run anova
+# plot(aov(Total.Mean~Pred.Treatment*Heat.Treatment,data = Recovery.end)) # check assumption of homoscedasticity (not run)
+TukeyHSD(aov(Total.Mean~Pred.Treatment*Heat.Treatment,data = Recovery.end)) # Tukey's HSD post-hoc test checks significance of group differences (not run)
+
+```
+
+
+Make plots for multipanel figure:
+
+```{r}
+
+Y_min<-min(c(Peak.end$Total.Mean,Recovery.end$Total.Mean),na.rm = T)-0.01
+Y_max<-max(c(Peak.end$Total.Mean,Recovery.end$Total.Mean),na.rm = T)+0.01
+
+Func_plot1<-ggplot(data = Peak.end,
+                   mapping = aes(x = Pred.Treatment,
+                                 y = Total.Mean),
+                   group=Heat.Treatment,
+                   fill = Period2) +
+              ylab("Total Chlorophyll a (µg/cm²)") + 
+              xlab("Predator Treatment") + 
+              theme_classic() +
+              theme(text = element_text(size = 16), 
+                    axis.text = element_text(colour = "black"),
+                    strip.background = element_blank(),
+                    legend.position = "bottom") + 
+              geom_point(mapping = aes(shape = Pred.Treatment),
+                         position = position_jitter(width = 0.35),
+                         size = 2,
+                         show.legend = FALSE) + 
+              geom_boxplot(mapping = aes(fill = Heat.Treatment),
+                           alpha = 0.6) +
+              facet_grid(. ~ Heat.Treatment,
+                         scales = 'fixed') + 
+              scale_shape_manual(values = c(16,17),
+                                 guide=FALSE) +
+              scale_fill_viridis_d(end = 0.8,begin = 0.3,
+                                     option = "inferno",guide=F) + 
+              scale_y_continuous(limits = c(Y_min,Y_max),
+                                 breaks = pretty_breaks(n = 7))
+
+
+Func_plot2<-ggplot(data = Recovery.end,
+                   mapping = aes(x = Pred.Treatment,
+                                 y = Total.Mean),
+                   group=Heat.Treatment,
+                   fill = Period2) +
+          ylab("Total Chlorophyll a (µg/cm²)") + 
+          xlab("Predator Treatment") + 
+          theme_classic() +
+          theme(text = element_text(size = 16), 
+                axis.text = element_text(colour = "black"),
+                strip.background = element_blank(),
+                legend.position = "bottom") + 
+          geom_point(mapping = aes(shape = Pred.Treatment),
+                     position = position_jitter(width = 0.35),
+                     size = 2,
+                     show.legend = FALSE) + 
+          geom_boxplot(mapping = aes(fill = Heat.Treatment),
+                       alpha = 0.6) +
+          facet_grid(. ~ Heat.Treatment,
+                     scales = 'fixed') + 
+          scale_shape_manual(values = c(16,17),
+                             guide=FALSE) +
+          scale_fill_viridis_d(end = 0.8,begin = 0.3,
+                                 option = "inferno",guide=F) + 
+          scale_y_continuous(limits = c(Y_min,Y_max),
+                             breaks = pretty_breaks(n = 7))
+```
+
+**Temporal variability**
+
+Next, we'll calculate functional temporal variability as the coefficient of variation of total algal biomass for each mesocosm. First, we'll separate out the peak heatwave and total heatwave for calculating variability:
+
+```{r}
+
+# get time series for calculating CV
+Peak.ts<-Bentho.Mean[Bentho.Mean$Date %in% Bentho.Mean$Date[Bentho.Mean$Period2 %in% "Peak"],]
+Recov.ts<-Bentho.Mean[Bentho.Mean$Date %in% Bentho.Mean$Date[Bentho.Mean$Period2 %in% c("Recovery")],]
+
+# make output dataframes
+Peak.CV<-Peak.end[,c(2:5)]
+Peak.CV$Temp.Var<-NA
+Recovery.CV<-Peak.CV
+
+```
+
+
+Now we'll calculate temporal variability by hard coding the coefficient of variation |sd/abs(mean)| for each mesocosm across each period, and store it in the dataframe:
+
+```{r}
+
+# calculate temporal variability for just peak heatwave period
+for (i in 1:nrow(Peak.CV)) {
+  Peak.CV$Temp.Var[i]<-sd(Peak.ts$Total.Mean[Peak.ts$Mesocosm.No %in% Peak.CV$Mesocosm.No[i]],
+                          na.rm = T)/abs(mean(Peak.ts$Total.Mean[Peak.ts$Mesocosm.No %in% Peak.CV$Mesocosm.No[i]],
+                                              na.rm = T))
+}
+
+# calculate temporal variability for recovery period
+for (i in 1:nrow(Recovery.CV)) {
+  Recovery.CV$Temp.Var[i]<-sd(Recov.ts$Total.Mean[Recov.ts$Mesocosm.No %in% Recovery.CV$Mesocosm.No[i]],
+                          na.rm = T)/abs(mean(Recov.ts$Total.Mean[Recov.ts$Mesocosm.No %in% Recovery.CV$Mesocosm.No[i]],
+                                              na.rm = T))
+}
+
+```
+
+
+**Treatment effects on temporal variability**
+
+Now we'll do the stats to test for treatment effects on the temporal variability of algal biomass: 
+
+```{r}
+
+##-- Heatwave Peak --##
+# hist(Peak.CV$Temp.Var) # assess normality (not run)
+summary(aov(Temp.Var~Pred.Treatment*Heat.Treatment,data = Peak.CV)) # run anova
+# plot(aov(Temp.Var~Pred.Treatment*Heat.Treatment,data = Peak.CV)) # check assumption of homoscedasticity (not run)
+
+##-- Recovery --##
+# hist(Recovery.CV$Temp.Var) # assess normality (not run)
+summary(aov(Temp.Var~Pred.Treatment*Heat.Treatment,data = Recovery.CV)) # run anova
+# plot(aov(Temp.Var~Pred.Treatment*Heat.Treatment,data = Recovery.CV)) # check assumption of homoscedasticity (not run)
+TukeyHSD(aov(Temp.Var~Pred.Treatment*Heat.Treatment,data = Recovery.CV)) # Tukey's HSD post-hoc test checks significance of group differences
+
+```
+
+
+Make plots for multipanel figure:
+
+```{r}
+
+Y_min<-min(c(Peak.CV$Temp.Var,Recovery.CV$Temp.Var),na.rm = T)-0.001
+Y_max<-max(c(Peak.CV$Temp.Var,Recovery.CV$Temp.Var),na.rm = T)+0.001
+
+Func_plot3<-ggplot(data = Peak.CV,
+       mapping = aes(x = Pred.Treatment,
+                     y = Temp.Var),
+       group=Heat.Treatment,
+       fill = Period2) +
+  ylab("Functional temporal variability") + 
+  xlab("Predator Treatment") + 
+  theme_classic() +
+  theme(text = element_text(size = 16), 
+        axis.text = element_text(colour = "black"),
+        strip.background = element_blank(),
+        legend.position = "bottom") + 
+  geom_point(mapping = aes(shape = Pred.Treatment),
+             position = position_jitter(width = 0.35),
+             size = 2,
+             show.legend = FALSE) + 
+  geom_boxplot(mapping = aes(fill = Heat.Treatment),
+               alpha = 0.6) +
+  facet_grid(. ~ Heat.Treatment,
+             scales = 'fixed') + 
+  scale_shape_manual(values = c(16,17),
+                     guide=FALSE) +
+  scale_fill_viridis_d(end = 0.8,begin = 0.3,
+                         option = "inferno",guide=F) + 
+  scale_y_continuous(limits = c(Y_min,Y_max),
+                     breaks = pretty_breaks(n = 7))
+
+Func_plot4<-ggplot(data = Recovery.CV,
+       mapping = aes(x = Pred.Treatment,
+                     y = Temp.Var),
+       group=Heat.Treatment,
+       fill = Period2) +
+  ylab("Functional temporal variability") + 
+  xlab("Predator Treatment") + 
+  theme_classic() +
+  theme(text = element_text(size = 16), 
+        axis.text = element_text(colour = "black"),
+        strip.background = element_blank(),
+        legend.position = "bottom") + 
+  geom_point(mapping = aes(shape = Pred.Treatment),
+             position = position_jitter(width = 0.35),
+             size = 2,
+             show.legend = FALSE) + 
+  geom_boxplot(mapping = aes(fill = Heat.Treatment),
+               alpha = 0.6) +
+  facet_grid(. ~ Heat.Treatment,
+             scales = 'fixed') + 
+  scale_shape_manual(values = c(16,17),
+                     guide=FALSE) +
+  scale_fill_viridis_d(end = 0.8,begin = 0.3,
+                         option = "inferno",guide=F) + 
+  scale_y_continuous(limits = c(Y_min,Y_max),
+                     breaks = pretty_breaks(n = 7))
+
+```
+
+
+**Spatial variability**
+
+Next, we'll look at the spatial variability of total algal biomass in our mesocosms. All but 2 mesocosms (N=46) had 3 algae tiles and were measured 3 times rather than once. The above values are based on means of the 3 tiles, but here we'll look at the variability (again, we'll use CV) of those 3 tiles. Since these measurements were taken daily, we'll first measure the spatial variability of the tiles on each day:
+
+```{r}
+
+# filter by mesocosms with multiple measures on each date
+Space<-filter(group_by(Bentho,Date,Mesocosm.No),n()>1)
+
+# make output dataframe
+Space.Var<-distinct(Space,Date,Mesocosm.No,.keep_all = TRUE) # unique date x mesocosm.no
+Space.Var<-Space.Var[,c(1,6:11)] # remove data
+Space.Var<-as.data.frame(Space.Var) # convert to dataframe to allow cbind
+Space.Var$Space.CV<-NA
+
+# spatial variability for each date x mesocosm
+for (i in 1:nrow(Space.Var)) {
+  Space.Var$Space.CV[i]<-sd(Space$Total.Conc[Space$Date %in% Space.Var$Date[i] & 
+                                               Space$Mesocosm.No %in% Space.Var$Mesocosm.No[i]],
+                            na.rm = T)/abs(mean(Space$Total.Conc[Space$Date %in% Space.Var$Date[i] & 
+                                                                   Space$Mesocosm.No %in% Space.Var$Mesocosm.No[i]],
+                                                na.rm = T))
+}
+
+# get appropriate periods
+Space.Var$Period2<-NA
+Space.Var$Period2[Space.Var$Period %in% "Initial"]<-"Colonisation"
+Space.Var$Period2[Space.Var$Period %in% "Recovery"]<-"Recovery"
+Space.Var$Period2[Space.Var$Period %in% c("Ambient","Ambient.1","Ambient.2")]<-"Control"
+Space.Var$Period2[Space.Var$Date %in% parse_datetime(c("2019-07-30","2019-07-31"),locale = locale(tz = "Japan")) & 
+                      Space.Var$Heat.Treatment %!in% "Ambient"]<-"Onset"
+Space.Var$Period2[Space.Var$Date %in% parse_datetime(c("2019-08-01","2019-08-02","2019-08-03","2019-08-04","2019-08-05"),
+                                                         locale = locale(tz = "Japan")) & 
+                      Space.Var$Heat.Treatment %!in% "Ambient"]<-"Peak"
+Space.Var$Period2[Space.Var$Date %in% parse_datetime(c("2019-08-06","2019-08-07","2019-08-08"),
+                                                         locale = locale(tz = "Japan")) & 
+                      Space.Var$Heat.Treatment %!in% "Ambient"]<-"Decline"
+
+Space.Var$Period2<-parse_factor(Space.Var$Period2,
+                                   levels = c("Control","Colonisation","Onset","Peak","Decline","Recovery"),
+                                   ordered = T,
+                                   include_na = F)
+```
+
+
+We'll again separate out our time points on 2 specific dates: 1) the final day of peak heating, and 2) the final day of the experiment after 20-days of post-heatwave recovery.
+
+```{r}
+
+# 1) End of peak heatwave
+Peak.space<-Space.Var[Space.Var$Date %in% parse_datetime("2019-08-05",locale = locale(tz = "Japan")),]
+
+# 2) End of experiment
+Recovery.space<-Space.Var[Space.Var$Date %in% parse_datetime("2019-08-28",locale = locale(tz = "Japan")),]
+
+```
+
+
+**Treatment effects on spatial variability**
+
+Now we'll do the stats to test for treatment effects on the spatial variability of algal biomass: 
+
+```{r}
+
+##-- End of Heatwave Peak --##
+# hist(Peak.space$Space.CV) # assess normality (not run)
+summary(aov(Space.CV~Pred.Treatment*Heat.Treatment,data = Peak.space)) # run anova
+# plot(aov(Space.CV~Pred.Treatment*Heat.Treatment,data = Peak.space)) # check assumption of homoscedasticity (not run)
+
+##-- End of Recovery Period --##
+# hist(Recovery.space$Space.CV) # assess normality (not run)
+summary(aov(log10(Space.CV)~Pred.Treatment*Heat.Treatment,data = Recovery.space)) # run anova
+# plot(aov(log10(Space.CV)~Pred.Treatment*Heat.Treatment,data = Recovery.space)) # check assumption of homoscedasticity (not run)
+
+```
+
+
+Make plots for multipanel figure:
+
+```{r}
+
+Y_min<-min(c(Peak.space$Space.CV,Recovery.space$Space.CV),na.rm = T)-0.01
+Y_max<-max(c(Peak.space$Space.CV,Recovery.space$Space.CV),na.rm = T)+0.01
+
+
+
+Func_plot5<-ggplot(data = Peak.space,
+                   mapping = aes(x = Pred.Treatment,
+                                 y = Space.CV),
+                   group=Heat.Treatment,
+                   fill = Period2) +
+              ylab("Functional spatial variability") + 
+              xlab("Predator Treatment") + 
+              theme_classic() +
+              theme(text = element_text(size = 16), 
+                    axis.text = element_text(colour = "black"),
+                    strip.background = element_blank(),
+                    legend.position = "bottom") + 
+              geom_point(mapping = aes(shape = Pred.Treatment),
+                         position = position_jitter(width = 0.35),
+                         size = 2,
+                         show.legend = FALSE) + 
+              geom_boxplot(mapping = aes(fill = Heat.Treatment),
+                           alpha = 0.6) +
+              facet_grid(. ~ Heat.Treatment,
+                         scales = 'fixed') + 
+              scale_shape_manual(values = c(16,17),
+                                 guide=FALSE) +
+              scale_fill_viridis_d(end = 0.8,begin = 0.3,
+                                     option = "inferno",guide=F) + 
+              scale_y_continuous(limits = c(Y_min,Y_max),
+                                 breaks = pretty_breaks(n = 7))
+
+Func_plot6<-ggplot(data = Recovery.space,
+                   mapping = aes(x = Pred.Treatment,
+                                 y = Space.CV),
+                   group=Heat.Treatment,
+                   fill = Period2) +
+              ylab("Functional spatial variability") + 
+          xlab("Predator Treatment") + 
+          theme_classic() +
+          theme(text = element_text(size = 16), 
+                axis.text = element_text(colour = "black"),
+                strip.background = element_blank(),
+                legend.position = "bottom") + 
+          geom_point(mapping = aes(shape = Pred.Treatment),
+                     position = position_jitter(width = 0.35),
+                     size = 2,
+                     show.legend = FALSE) + 
+          geom_boxplot(mapping = aes(fill = Heat.Treatment),
+                       alpha = 0.6) +
+          facet_grid(. ~ Heat.Treatment,
+                     scales = 'fixed') + 
+          scale_shape_manual(values = c(16,17),
+                             guide=FALSE) +
+          scale_fill_viridis_d(end = 0.8,begin = 0.3,
+                                 option = "inferno",guide=F) + 
+          scale_y_continuous(limits = c(Y_min,Y_max),
+                             breaks = pretty_breaks(n = 7))
+```
+
+
+**Multipanel figure**
+
+Finally let's put all the panels together to produce our multipanel Figure 1. Left panels are for the peak heatwave and right are the recovery period. Top are for biomass, middle are for temporal variability, and bottom are for spatial variability. 
+
+```{r}
+
+# plot multipanel figure using patchwork
+(Func_plot1 + Func_plot2) / (Func_plot3 + Func_plot4) / (Func_plot5 + Func_plot6)
+
+# remove results dataframes to save space
+rm(Peak.CV,Peak.end,Peak.space,Peak.ts,Recov.ts,Recovery.end,Recovery.CV,Recovery.space,Space.Var,Space,Bentho.Mean)
+
+```
+
+## Compositional stability
+
+Now let's look for treatment effects on algal composition and compositional temporal and spatial variability. 
+
+**Mean values**
+
+We'll use the mean of our tiles within each measocosm to look for treatment effects on algal composition and variability. We'll have to re-create the Bentho.Mean dataframe, this time taking means of the three algal groups (green algae, cyanobacteria, and diatoms; see Methods):
+
+```{r}
+
+# Here we'll get the mean values to use for our plots. We can use $Mesocosm.No as an index to calculate across the three spatial replicates each day
+
+Bentho.Mean<-distinct(Bentho,Date,Mesocosm.No,.keep_all = TRUE) # for each date get unique date x mesocosm.no
+Bentho.Mean<-Bentho.Mean[,c(1,6:9,11)] # remove data
+Bentho.Mean<-as.data.frame(Bentho.Mean) # convert to dataframe to allow cbind
+Bentho.Mean<-cbind(Bentho.Mean,Green.Mean=NA,Cyano.Mean=NA,Diatom.Mean=NA) # cbind the mean columns on
+
+# get mean of each variable for each date x mesocosm
+for (i in 1:nrow(Bentho.Mean)) {
+  Bentho.Mean$Green.Mean[i]<-mean(Bentho$Green.Algae[Bentho$Date %in% Bentho.Mean$Date[i] & 
+                                                       Bentho$Mesocosm.No %in% Bentho.Mean$Mesocosm.No[i]],na.rm = T) # get mean of green algae across tiles
+  Bentho.Mean$Cyano.Mean[i]<-mean(Bentho$Cyano[Bentho$Date %in% Bentho.Mean$Date[i] & 
+                                                 Bentho$Mesocosm.No %in% Bentho.Mean$Mesocosm.No[i]],na.rm = T)  # get mean of cyanobacteria across tiles
+  Bentho.Mean$Diatom.Mean[i]<-mean(Bentho$Diatoms[Bentho$Date %in% Bentho.Mean$Date[i] & 
+                                                    Bentho$Mesocosm.No %in% Bentho.Mean$Mesocosm.No[i]],na.rm = T)  # get mean of diatoms across tiles
+}
+  
+Bentho.Mean$Mesocosm.No<-as.character(Bentho.Mean$Mesocosm.No)
+
+# label appropriate periods
+Bentho.Mean$Period2<-NA
+Bentho.Mean$Period2[Bentho.Mean$Period %in% "Initial"]<-"Colonisation"
+Bentho.Mean$Period2[Bentho.Mean$Period %in% "Recovery"]<-"Recovery"
+Bentho.Mean$Period2[Bentho.Mean$Period %in% c("Ambient","Ambient.1","Ambient.2")]<-"Control"
+Bentho.Mean$Period2[Bentho.Mean$Date %in% parse_datetime(c("2019-07-30","2019-07-31"),locale = locale(tz = "Japan")) & 
+                      Bentho.Mean$Heat.Treatment %!in% "Ambient"]<-"Onset"
+Bentho.Mean$Period2[Bentho.Mean$Date %in% parse_datetime(c("2019-08-01","2019-08-02","2019-08-03","2019-08-04","2019-08-05"),
+                                                         locale = locale(tz = "Japan")) & 
+                      Bentho.Mean$Heat.Treatment %!in% "Ambient"]<-"Peak"
+Bentho.Mean$Period2[Bentho.Mean$Date %in% parse_datetime(c("2019-08-06","2019-08-07","2019-08-08"),
+                                                         locale = locale(tz = "Japan")) & 
+                      Bentho.Mean$Heat.Treatment %!in% "Ambient"]<-"Decline"
+
+Bentho.Mean$Period2<-parse_factor(Bentho.Mean$Period2,
+                                   levels = c("Control","Colonisation","Onset","Peak","Decline","Recovery"),
+                                   ordered = T,
+                                   include_na = F)
+```
+
+**Bray-Curtis dissimilarity**
+
+First, we'll produce the Hellinger transformed community matrix which is basically the square root transformation of relative abundance, but is even less sensitive to abundance (particularly in the case of large numbers of taxa). Hellinger transformations do not give high weights to rare species. Legendre & Gallagher (2001, _Oecologia_) suggest using Hellinger transformation before ordination *unless* one wants to give high weight to rare species.
+
+```{r}
+
+Bentho.Mean[,7:9] <- decostand(Bentho.Mean[,7:9], "hellinger") # Hellinger-transform the species dataset
+
+```
+
+Now we have Hellinger-transformed algae data from which we can calculate Bray Curtis (dis)similarity. We'll get the compositional struture of our algal communities on the 2 key dates (end of heatwave peak, end of experiment):
+
+```{r}
+
+Peak_structure<-Bentho.Mean[Bentho.Mean$Date %in% parse_datetime("2019-08-05",locale = locale(tz = "Japan")),7:9] # End of peak heatwave
+rownames(Peak_structure)<-as.character(C.Comp$Treat.Name)
+
+Recov_structure<-Bentho.Mean[Bentho.Mean$Date %in% parse_datetime("2019-08-28",locale = locale(tz = "Japan")),7:9] # End of experiment
+rownames(Recov_structure)<-as.character(C.Comp$Treat.Name)
+
+```
+
+That's our separate times, so now we'll use Nonmetric Multidimensional Scaling as our ordination technique before testing for treatment effects:
+
+```{r,echo=FALSE}
+
+##-- end of heatwave peak --##
+
+nmds_Peak<-metaMDS(comm = Peak_structure,distance = "bray",k = 2,trymax = 100) # run an NMDS on the relative abundance data
+# stressplot(nmds_Peak) # check stress plot (not run)
+
+data.scores_Peak <- as.data.frame(scores(nmds_Peak)) # Using Vegan's scores() function to extract the site scores and convert to a data.frame  
+
+# add treatment data to NMDS results
+data.scores_Peak$Pred.Treatment <- Bentho.Mean$Pred.Treatment[Bentho.Mean$Date %in% parse_datetime("2019-08-05",locale = locale(tz = "Japan"))]
+data.scores_Peak$Heat.Treatment <- Bentho.Mean$Heat.Treatment[Bentho.Mean$Date %in% parse_datetime("2019-08-05",locale = locale(tz = "Japan"))]
+data.scores_Peak$Treatment<-Bentho.Mean$Treatment[Bentho.Mean$Date %in% parse_datetime("2019-08-05",locale = locale(tz = "Japan"))]
+
+# convert treatment data to factors
+data.scores_Peak$Pred.Treatment<-parse_factor(x = as.character(data.scores_Peak$Pred.Treatment),
+                                    ordered = T,
+                                    include_na = F,
+                                    levels = c("Present","Absent"))
+data.scores_Peak$Heat.Treatment<-parse_factor(x = as.character(data.scores_Peak$Heat.Treatment),
+                                    ordered = T,
+                                    include_na = F,
+                                    levels = c("Ambient","Current","Future"))
+data.scores_Peak$Treatment<-parse_factor(x = as.character(data.scores_Peak$Treatment),
+                                    ordered = F,
+                                    include_na = F)
+
+
+##-- end of recovery period --##
+
+nmds_Recov<-metaMDS(comm = Recov_structure,distance = "bray",k = 2,trymax = 100) # run an NMDS on the relative abundance data
+# stressplot(nmds_Recov) # check stress plot (not run)
+
+data.scores_Recov <- as.data.frame(scores(nmds_Recov)) # Using Vegan's scores() function to extract the site scores and convert to a data.frame
+
+# add treatment data to NMDS results
+data.scores_Recov$Pred.Treatment <- Bentho.Mean$Pred.Treatment[Bentho.Mean$Date %in% parse_datetime("2019-08-28",locale = locale(tz = "Japan"))]
+data.scores_Recov$Heat.Treatment <- Bentho.Mean$Heat.Treatment[Bentho.Mean$Date %in% parse_datetime("2019-08-28",locale = locale(tz = "Japan"))]
+data.scores_Recov$Treatment<-Bentho.Mean$Treatment[Bentho.Mean$Date %in% parse_datetime("2019-08-28",locale = locale(tz = "Japan"))]
+
+# convert treatment data to factors
+data.scores_Recov$Pred.Treatment<-parse_factor(x = as.character(data.scores_Recov$Pred.Treatment),
+                                    ordered = T,
+                                    include_na = F,
+                                    levels = c("Present","Absent"))
+data.scores_Recov$Heat.Treatment<-parse_factor(x = as.character(data.scores_Recov$Heat.Treatment),
+                                    ordered = T,
+                                    include_na = F,
+                                    levels = c("Ambient","Current","Future"))
+data.scores_Recov$Treatment<-parse_factor(x = as.character(data.scores_Recov$Treatment),
+                                    ordered = F,
+                                    include_na = F)
+```
+
+
+**Treatment effects on algal composition**
+
+Now we'll do the stats to test for treatment effects on algal community structure. Note the post-hoc tests require the pairwiseAdonis package, available from github:
+
+```{r}
+
+# use pairwiseAdonis function as equivalent posthoc pairwise test
+#library(devtools) (not run)
+#install_github("pmartinezarbizu/pairwiseAdonis/pairwiseAdonis") (not run)
+require(pairwiseAdonis)
+
+##-- end of heatwave peak --##
+
+# use Vegan's adonis2() to test significance of predators, heatwaves, and their interaction
+adonis2(formula = Peak_structure ~ data.scores_Peak$Pred.Treatment,
+        permutations = 10000)
+adonis2(formula = Peak_structure ~ data.scores_Peak$Heat.Treatment,
+        permutations = 10000)
+adonis2(formula = Peak_structure ~ data.scores_Peak$Pred.Treatment * data.scores_Peak$Heat.Treatment,
+        permutations = 10000)
+
+# post-hoc
+pairwise.adonis(Peak_structure,
+                factors = data.scores_Peak$Heat.Treatment,
+                p.adjust.m = 'bonferroni')
+
+
+##-- end of recovery period --##
+
+# use Vegan's adonis2() to test significance of predators, heatwaves, and their interaction
+adonis2(formula = Recov_structure ~ data.scores_Recov$Pred.Treatment,
+        permutations = 10000)
+adonis2(formula = Recov_structure ~ data.scores_Recov$Heat.Treatment,
+        permutations = 10000)
+adonis2(formula = Recov_structure ~ data.scores_Recov$Pred.Treatment * data.scores_Peak$Heat.Treatment,
+        permutations = 10000)
+
+# post-hoc
+pairwise.adonis(Recov_structure,
+                factors = data.scores_Recov$Heat.Treatment,
+                p.adjust.m = 'bonferroni')
+```
+
+We can then do a Simplirity of Percentages analysis (Simper) to test for which species (in this case, algal groups) are driving significant treatment effects on composition: 
+
+```{r}
+
+##-- signiifcant predator effect during heatwave peak --##
+
+summary(simper(comm = Peak_structure,
+               group = data.scores_Peak$Pred.Treatment,
+               permutations = 1000))
+
+
+##-- signiifcant heatwave effects during recovery period --##
+
+# ambient vs current heatwave
+summary(simper(comm = Recov_structure,
+               group = data.scores_Recov$Heat.Treatment,
+               permutations = 1000))[3]
+
+# ambient vs future heatwave
+summary(simper(comm = Recov_structure,
+               group = data.scores_Recov$Heat.Treatment,
+               permutations = 1000))[2]
+```
+
+Merge data by significant treatment effects for each period for plotting:
+
+```{r}
+
+# merge by predator treatment for heatwave peak
+gg_pred<-merge(data.scores_Peak,
+               aggregate(cbind(mean.x=NMDS1,
+                               mean.y=NMDS2)~Pred.Treatment,
+                data.scores_Peak,
+                mean),
+               by="Pred.Treatment")
+
+# merge by heatwave treatment for recovery period
+gg_heat<-merge(data.scores_Recov,
+               aggregate(cbind(mean.x=NMDS1,
+                               mean.y=NMDS2)~Heat.Treatment,
+                data.scores_Recov,
+                mean),
+      by="Heat.Treatment")
+
+```
+
+
+Now make NMDS figures to represent treatment differences in algal compositional structure:
+
+```{r}
+
+Comp_plot1<-ggplot(data = gg_pred,
+                   mapping = aes(x = NMDS1,
+                                 y = NMDS2),
+                   group=gg_pred$Pred.Treatment) +
+              ylab("NDMS Axis 2") +
+              xlab("NMDS Axis 1") +
+              theme_classic() +
+              theme(text = element_text(size = 16), 
+                    axis.text = element_text(colour = "black"),
+                    legend.title=element_blank(),
+                    legend.position = "none") + 
+              geom_segment(aes(x=mean.x, 
+                               y=mean.y, 
+                               xend=NMDS1, 
+                               yend=NMDS2),
+                           col = "black",
+                           alpha = 0.2) +
+              geom_point(mapping = aes(shape = Pred.Treatment),
+                          col = "black",
+                         size = 3,alpha = 0.8) +
+              geom_point(aes(x=mean.x, 
+                             y=mean.y,
+                             shape = Pred.Treatment),
+                         col = "black",
+                         size=6) +
+              scale_shape_manual(values = c(16,17)) +
+              scale_linetype_manual(values = c(1,5)) +
+              scale_colour_viridis_d(end = 0.8,begin = 0.3,
+                                     option = "inferno") + 
+              scale_y_continuous(n.breaks = 6) + 
+              scale_x_continuous(n.breaks = 7)
+
+Comp_plot2<-ggplot(data = gg_heat,
+                   mapping = aes(x = NMDS1,
+                                 y = NMDS2),
+                   group=gg_heat2$Heat.Treatment) +
+              ylab("NDMS Axis 2") +
+              xlab("NMDS Axis 1") +
+              theme_classic() +
+              theme(text = element_text(size = 16), 
+                    axis.text = element_text(colour = "black"),
+                    legend.title=element_blank(),
+                    legend.position = "none") + 
+              geom_segment(aes(x=mean.x, 
+                               y=mean.y, 
+                               xend=NMDS1, 
+                               yend=NMDS2,
+                             col = Heat.Treatment), 
+                             alpha = 0.2) +
+              geom_point(mapping = aes(col = Heat.Treatment),
+                         size = 3,alpha = 0.8) +
+              geom_point(aes(x=mean.x, 
+                             y=mean.y,
+                             col = Heat.Treatment),
+                         size=6) +
+              scale_shape_manual(values = c(1,2)) +
+              scale_linetype_manual(values = c(1,5)) +
+              scale_colour_viridis_d(end = 0.8,begin = 0.3,
+                                     option = "inferno") + 
+              scale_y_continuous(n.breaks = 6) + 
+              scale_x_continuous(n.breaks = 7)
+
+```
+
+
+**Temporal variability**
+
+Now we're going to calculate the dissimilarity through time to get at temporal variability. We'll use the Euclidean distance of each mesocosm at time (t) to the centroid of that mesocosm through time. 
+
+First, separate out the peak heatwave and total heatwave for calculating variability:
+
+```{r}
+
+# get time series for calculating CV
+Peak.ts<-Bentho.Mean[Bentho.Mean$Date %in% Bentho.Mean$Date[Bentho.Mean$Period2 %in% "Peak"],]
+Recov.ts<-Bentho.Mean[Bentho.Mean$Date %in% Bentho.Mean$Date[Bentho.Mean$Period2 %in% "Recovery"],]
+
+# 1) End of peak heatwave
+Peak.CV<-Bentho.Mean[Bentho.Mean$Date %in% parse_datetime("2019-08-05",locale = locale(tz = "Japan")),c(2:6,10)]
+Peak.CV$Temp.Var<-NA
+Recov.CV<-Peak.CV
+
+# convert treatments to factor class for calculating Euclidean distances
+Peak.ts$Treatment<-parse_factor(x = as.character(Peak.ts$Treatment),
+                                      levels = c("1","2","3","4","5","6"),
+                                      ordered = T,
+                                      include_na = F)
+Recov.ts$Treatment<-parse_factor(x = as.character(Recov.ts$Treatment),
+                                 levels = c("1","2","3","4","5","6"),
+                                 ordered = T,
+                                 include_na = F)
+```
+
+Now generate dissimilarity matrices using Bray-Curtis:
+
+```{r}
+
+##-- Heatwave Peak --##
+Peak.mat<-list()
+for (i in 1:nrow(Peak.CV)) {
+  
+  # separate data for each mesocosm
+  Data<-Peak.ts[Peak.ts$Mesocosm.No %in% Peak.CV$Mesocosm.No[i],7:9]
+
+  # calculate dissimilarity between time points
+  Peak.mat[[i]]<-vegdist(Data,
+                         method="bray", 
+                         binary=FALSE, 
+                         diag=TRUE, 
+                         upper=FALSE, 
+                         na.rm = TRUE)
+}
+
+##-- Recovery Period --##
+Recov.mat<-list()
+for (i in 1:nrow(Recov.CV)) {
+  
+  # separate data for each mesocosm
+  Data<-Recov.ts[Recov.ts$Mesocosm.No %in% Recov.CV$Mesocosm.No[i],7:9]
+
+  # calculate dissimilarity between time points
+  Recov.mat[[i]]<-vegdist(Data,
+                          method="bray", 
+                          binary=FALSE, 
+                          diag=TRUE, 
+                          upper=FALSE, 
+                          na.rm = TRUE)
+}
+
+```
+
+Now we can calculate temporal variability as the mean Euclidean distance to each mesocosm's date-averaged centroid, where higher values indicate greater dispersion through time (higher variability):
+
+```{r}
+
+##-- Heatwave Peak --##
+for (i in 1:nrow(Peak.CV)) {
+
+  # calculate Euclidean distances to group centroids
+  Centroid.Out<-betadisper(d = Peak.mat[[i]],
+                 group = Peak.ts$Treatment[Peak.ts$Mesocosm.No %in% Peak.CV$Mesocosm.No[i]], # sets group centroids as mesocosms
+                 type = "centroid",
+                 sqrt.dist = T)
+  
+  # mean of Euclidean distances = temporal variability
+  Peak.CV$Temp.Var[i]<-mean(Centroid.Out$distances,na.rm=T)
+}
+
+##-- Recovery period --##
+for (i in 1:nrow(Recov.CV)) {
+
+  # calculate Euclidean distances to group centroids
+  Centroid.Out<-betadisper(d = Recov.mat[[i]],
+                 group = Recov.ts$Treatment[Recov.ts$Mesocosm.No %in% Recov.CV$Mesocosm.No[i]],
+                 type = "centroid",
+                 sqrt.dist = T)
+  
+  # mean of Euclidean distances = temporal variability
+  Recov.CV$Temp.Var[i]<-mean(Centroid.Out$distances,na.rm=T)
+
+}
+```
+
+
+**Treatment effects on temporal variability**
+
+Now we'll do the stats to test for treatment effects on the temporal variability of algal community structure:
+
+```{r}
+
+##-- Heatwave Peak --##
+# hist(Peak.CV$Temp.Var) # assess normality (not run)
+summary(aov(log10(Temp.Var)~Pred.Treatment*Heat.Treatment,data = Peak.CV)) # run anova
+# plot(aov(log10(Temp.Var)~Pred.Treatment*Heat.Treatment,data = Peak.CV)) # check assumption of homoscedasticity (not run)
+TukeyHSD(aov(log10(Temp.Var)~Pred.Treatment*Heat.Treatment,data = Peak.CV)) # Tukey's HSD post-hoc test checks significance of group differences
+
+##-- Recovery Period --##
+# hist(Recovery.CV$Temp.Var) # assess normality (not run)
+summary(aov(log10(Temp.Var)~Pred.Treatment*Heat.Treatment,data = Recov.CV)) # run anova
+# plot(aov(log10(Temp.Var)~Pred.Treatment*Heat.Treatment,data = Recov.CV)) # check assumption of homoscedasticity (not run)
+
+```
+
+
+Make plots for multipanel figure:
+
+```{r}
+
+Y_min<-min(c(Peak.CV$Temp.Var,Recov.CV$Temp.Var),na.rm = T)-0.001
+Y_max<-max(c(Peak.CV$Temp.Var,Recov.CV$Temp.Var),na.rm = T)+0.001
+
+Comp_plot3<-ggplot(data = Peak.CV,
+                   mapping = aes(x = Pred.Treatment,
+                                 y = Temp.Var),
+                   group=Heat.Treatment,
+                   fill = Period2) +
+              ylab("Compositional temporal variability") + 
+              xlab("Predator Treatment") + 
+              theme_classic() +
+              theme(text = element_text(size = 16), 
+                    axis.text = element_text(colour = "black"),
+                    strip.background = element_blank(),
+                    legend.position = "bottom") + 
+              geom_point(mapping = aes(shape = Pred.Treatment),
+                         position = position_jitter(width = 0.35),
+                         size = 2,
+                         show.legend = FALSE) + 
+              geom_boxplot(mapping = aes(fill = Heat.Treatment),
+                           alpha = 0.6) +
+              facet_grid(. ~ Heat.Treatment,
+                         scales = 'fixed') + 
+              scale_shape_manual(values = c(16,17),
+                                 guide=FALSE) +
+              scale_fill_viridis_d(end = 0.8,begin = 0.3,
+                                     option = "inferno",guide=F) + 
+              scale_y_continuous(limits = c(Y_min,Y_max),
+                                 breaks = pretty_breaks(n = 7))
+
+
+Comp_plot4<-ggplot(data = Recov.CV,
+                   mapping = aes(x = Pred.Treatment,
+                                 y = Temp.Var),
+                   group=Heat.Treatment,
+                   fill = Period2) +
+              ylab("Compositional temporal variability") + 
+              xlab("Predator Treatment") + 
+              theme_classic() +
+              theme(text = element_text(size = 16), 
+                    axis.text = element_text(colour = "black"),
+                    strip.background = element_blank(),
+                    legend.position = "bottom") + 
+              geom_point(mapping = aes(shape = Pred.Treatment),
+                         position = position_jitter(width = 0.35),
+                         size = 2,
+                         show.legend = FALSE) + 
+              geom_boxplot(mapping = aes(fill = Heat.Treatment),
+                           alpha = 0.6) +
+              facet_grid(. ~ Heat.Treatment,
+                         scales = 'fixed') + 
+              scale_shape_manual(values = c(16,17),
+                                 guide=FALSE) +
+              scale_fill_viridis_d(end = 0.8,begin = 0.3,
+                                     option = "inferno",guide=F) + 
+              scale_y_continuous(limits = c(Y_min,Y_max),
+                                 breaks = pretty_breaks(n = 7))
+```
+
+**Spatial variability**
+
+Next, we'll calculate compositional spatial variability as the mean euclidean distance from each mesocosm to their treatment-level centroid on each day. In this way, we're testing for treatment-level differences in the heterogeneity between mesocosms. 
+
+First, let's generate our output matrices:
+
+```{r}
+
+# output matrices
+Peak.space<-distinct(.data = Peak.ts,Date,Treatment,.keep_all = TRUE)
+Peak.space<-Peak.space[,c(1,3:5,10)]
+Peak.space$Space.Var<-NA
+
+Recov.space<-distinct(.data = Recov.ts,Date,Treatment,.keep_all = TRUE)
+Recov.space<-Recov.space[,c(1,3:5,10)]
+Recov.space$Space.Var<-NA
+
+```
+
+Now generate dissimilarity matrices using Bray-Curtis:
+
+```{r}
+
+##-- Heatwave peak --##
+Peak.mat_space<-list()
+for (i in 1:nrow(Peak.space)) {
+  
+  # separate data for each treatment on each date
+  Data<-Peak.ts[Peak.ts$Treatment %in% Peak.space$Treatment[i] & Peak.ts$Date %in% Peak.space$Date[i],7:9]
+
+  # calculate dissimilarity between mesocosms within a treatment on a particular date
+  Peak.mat_space[[i]]<-vegdist(Data,
+                               method="bray", 
+                               binary=FALSE, 
+                               diag=TRUE, 
+                               upper=FALSE, 
+                               na.rm = TRUE)
+}
+
+##-- Recovery period --##
+Recov.mat_space<-list()
+for (i in 1:nrow(Recov.space)) {
+  
+  # separate data for each treatment on each date
+  Data<-Recov.ts[Recov.ts$Treatment %in% Recov.space$Treatment[i] & Recov.ts$Date %in% Recov.space$Date[i],7:9]
+  
+  # calculate dissimilarity between mesocosms within a treatment on a particular date
+  Recov.mat_space[[i]]<-vegdist(Data,
+                               method="bray", 
+                               binary=FALSE, 
+                               diag=TRUE, 
+                               upper=FALSE, 
+                               na.rm = TRUE)
+}
+```
+
+Now we can calculate spatial variability as the mean Euclidean distance to each treatment's centroid on each date, where higher values indicate higher variability across mesocosms:
+
+```{r}
+
+##-- Heatwave Peak --##
+for (i in 1:nrow(Peak.space)) {
+
+  # calculate Euclidean distances to group centroids
+  Centroid.Out<-betadisper(d = Peak.mat_space[[i]],
+                 group = Peak.ts$Treatment[Peak.ts$Treatment %in% Peak.space$Treatment[i] & Peak.ts$Date %in% Peak.space$Date[i]], # sets group centroids as treatments per date
+                 type = "centroid",
+                 sqrt.dist = T)
+  
+  # mean of Euclidean distances = spatial variability
+  Peak.space$Space.Var[i]<-mean(Centroid.Out$distances,na.rm=T)
+}
+
+##-- Recovery period --##
+for (i in 1:nrow(Recov.space)) {
+
+  # calculate Euclidean distances to group centroids
+  Centroid.Out<-betadisper(d = Recov.mat_space[[i]],
+                 group = Recov.ts$Treatment[Recov.ts$Treatment %in% Recov.space$Treatment[i] & Recov.ts$Date %in% Recov.space$Date[i]],
+                 type = "centroid",
+                 sqrt.dist = T)
+  
+  # mean of Euclidean distances = spatial variability
+  Recov.space$Space.Var[i]<-mean(Centroid.Out$distances,na.rm=T)
+}
+
+```
+
+
+**Treatment effects on spatial variability**
+
+Now we'll do the stats to test for treatment effects on the spatial variability of algal community structure. Note that these comparisons are using the different days as replicates per treatment, so the recovery period has N=20 and the heatwave peak has N=5.
+
+```{r}
+
+##-- Heatwave Peak --##
+# hist(Peak.space$Space.Var) # assess normality (not run)
+summary(aov(Space.Var~Pred.Treatment*Heat.Treatment,data = Peak.space)) # run anova
+# plot(aov(Space.Var~Pred.Treatment*Heat.Treatment,data = Peak.space)) # check assumption of homoscedasticity (not run)
+TukeyHSD(aov(Space.Var~Pred.Treatment*Heat.Treatment,data = Peak.space)) # Tukey's HSD post-hoc test checks significance of group differences
+
+##-- Recovery period --##
+# hist(Recov.space$Space.Var) # assess normality (not run)
+summary(aov(Space.Var~Pred.Treatment*Heat.Treatment,data = Recov.space)) # run anova
+# plot(aov(Space.Var~Pred.Treatment*Heat.Treatment,data = Recov.space)) # check assumption of homoscedasticity (not run)
+TukeyHSD(aov(Space.Var~Pred.Treatment*Heat.Treatment,data = Recov.space)) # Tukey's HSD post-hoc test checks significance of group differences
+
+```
+
+Make plots for multipanel figure:
+
+```{r}
+
+Y_min<-min(c(Peak.space$Space.Var,Recov.space$Space.Var),na.rm = T)-0.001
+Y_max<-max(c(Peak.space$Space.Var,Recov.space$Space.Var),na.rm = T)+0.001
+
+Comp_plot5<-ggplot(data = Peak.space,
+                   mapping = aes(x = Pred.Treatment,
+                                 y = Space.Var),
+                   group=Heat.Treatment,
+                   fill = Period2) +
+              ylab("Compositional spatial variability") + 
+              xlab("Predator Treatment") + 
+              theme_classic() +
+              theme(text = element_text(size = 16), 
+                    axis.text = element_text(colour = "black"),
+                    strip.background = element_blank(),
+                    legend.position = "bottom") + 
+              geom_point(mapping = aes(shape = Pred.Treatment),
+                         position = position_jitter(width = 0.35),
+                         size = 2,
+                         show.legend = FALSE) + 
+              geom_boxplot(mapping = aes(fill = Heat.Treatment),
+                           alpha = 0.6) +
+              facet_grid(. ~ Heat.Treatment,
+                         scales = 'fixed') + 
+              scale_shape_manual(values = c(16,17),
+                                 guide=FALSE) +
+              scale_fill_viridis_d(end = 0.8,begin = 0.3,
+                                     option = "inferno",guide=F) + 
+              scale_y_continuous(limits = c(Y_min,Y_max),
+                                 breaks = pretty_breaks(n = 7))
+
+
+Comp_plot6<-ggplot(data = Recov.space,
+                   mapping = aes(x = Pred.Treatment,
+                                 y = Space.Var),
+                   group=Heat.Treatment,
+                   fill = Period2) +
+              ylab("Compositional spatial variability") + 
+              xlab("Predator Treatment") + 
+              theme_classic() +
+              theme(text = element_text(size = 16), 
+                    axis.text = element_text(colour = "black"),
+                    strip.background = element_blank(),
+                    legend.position = "bottom") + 
+              geom_point(mapping = aes(shape = Pred.Treatment),
+                         position = position_jitter(width = 0.35),
+                         size = 2,
+                         show.legend = FALSE) + 
+              geom_boxplot(mapping = aes(fill = Heat.Treatment),
+                           alpha = 0.6) +
+              facet_grid(. ~ Heat.Treatment,
+                         scales = 'fixed') + 
+              scale_shape_manual(values = c(16,17),
+                                 guide=FALSE) +
+              scale_fill_viridis_d(end = 0.8,begin = 0.3,
+                                     option = "inferno",guide=F) + 
+              scale_y_continuous(limits = c(Y_min,Y_max),
+                                 breaks = pretty_breaks(n = 7))
+
+```
+
+**Multipanel figure**
+
+Finally let's put all the panels together to produce our multipanel Figure 2. Left panels are for the peak heatwave and right are the recovery period. Top are for compositional structure, middle are for temporal variability, and bottom are for spatial variability. 
+
+```{r}
+
+# plot multipanel figure using patchwork
+(Comp_plot1 + Comp_plot2) / (Comp_plot3 + Comp_plot4) / (Comp_plot5 + Comp_plot6)
+
+# remove results dataframes to save space
+rm(Peak.CV,Peak.mat,Peak.ts,Recov.ts,Recov.CV,Recov.space,Bentho.Mean,data.scores_Peak,data.scores_Recov,nmds_Peak,nmds_Recov,Peak_structure,Recov_structure,Centroid.Out,Data,Peak.mat_space,Peak.space,Recov.mat_space,Recov.mat)
+
+```
+
+
+## Macroinvertebrates
+
+Next we'll analyse our macroinvertebrate communities to test whether predators or heatwaves affected their composition, richness, or density. We sampled macroinvertebrate communities at the end of the experiment, so this will only be for the end of the recovery period, not for the end of the peak heatwave.
+
+**Bray-Curtis dissimilarity**
+
+First, let's generate the Bray-Curtis dissimilarity between mesocosms in terms of macroinvertebrate community composition: 
+
+```{r}
+
+# get a suitable community matrix
+Invert<-as.data.frame(C.Comp) # convert to dataframe
+rownames(Invert)<-as.character(Invert[,33]) # set rownames as unique mesocosm IDs
+Invert<-Invert[,c(-1:-5,-25:-33)] # remove all but the species abundance columns
+Invert<-decostand(Invert, method = "total") # convert abundance to relative abundance
+
+# run an NMDS on the relative abundance data
+Invert_nmds<-metaMDS(comm = Invert,distance = "bray",k = 2,trymax = 100)
+
+# check stress plot
+stressplot(Invert_nmds)
+
+## plot NDMS results
+
+#Using the scores function from vegan to extract the site scores and convert to a data.frame
+data.scores_Invert <- as.data.frame(scores(Invert_nmds))  
+
+# add treatment data to NMDS results
+data.scores_Invert$Pred.Treatment <- C.Comp$Pred.Treatment
+data.scores_Invert$Heat.Treatment <- C.Comp$Heat.Treatment
+data.scores_Invert$Treatment<-C.Comp$Treatment
+
+# convert treatment data to factors
+data.scores_Invert$Pred.Treatment<-parse_factor(x = as.character(data.scores_Invert$Pred.Treatment),
+                                    ordered = T,
+                                    include_na = F,
+                                    levels = c("Present","Absent"))
+data.scores_Invert$Heat.Treatment<-parse_factor(x = as.character(data.scores_Invert$Heat.Treatment),
+                                    ordered = T,
+                                    include_na = F,
+                                    levels = c("Ambient","Current","Future"))
+data.scores_Invert$Treatment<-parse_factor(x = as.character(data.scores_Invert$Treatment),
+                                    ordered = F,
+                                    include_na = F)
+```
+
+**Treatment effects on composition**
+
+Now let's test the significance of our treatment effects on macroinvertebrate community composition. We'll use the same adonis2() and pairwise.adnois() framework as we did for algal composition above:
+
+```{r}
+
+# use adonis2 function from vegan to test significance of predators, heatwaves, and their interaction
+adonis2(formula = Invert ~ data.scores_Invert$Pred.Treatment,
+        permutations = 10000)
+adonis2(formula = Invert ~ data.scores_Invert$Heat.Treatment,
+        permutations = 10000)
+adonis2(formula = Invert ~ data.scores_Invert$Pred.Treatment * data.scores_Invert$Heat.Treatment,
+        permutations = 10000)
+
+# use pairwiseAdonis function as equivalent posthoc pairwise test
+library(pairwiseAdonis)
+pairwise.adonis(Invert,
+                factors = data.scores_Invert$Heat.Treatment,
+                p.adjust.m = 'bonferroni') # post-hoc test of heatwave effects
+
+
+```
+
+We can then do a Simplirity of Percentages analysis (Simper) to test for which species are driving significant treatment effects on composition: 
+
+```{r}
+
+##-- signiifcant predator effect --##
+summary(simper(comm = Invert,
+               group = data.scores_Invert$Pred.Treatment,
+               permutations = 1000))
+
+##-- signiifcant heatwave effect --##
+# ambient vs future heatwave (the significant pairwise difference based on our post-hoc test)
+summary(simper(comm = Invert,
+               group = data.scores_Invert$Heat.Treatment,
+               permutations = 1000))[2]
+```
+
+Plot results for multipanel figure:
+
+```{r}
+
+# group by heatwave treatments for plotting
+gg_heat<-merge(data.scores_Invert,
+               aggregate(cbind(mean.x=NMDS1,
+                               mean.y=NMDS2)~Heat.Treatment,
+                data.scores_Invert,
+                mean),
+      by="Heat.Treatment")
+
+Invert_plot1<-ggplot(data = gg_heat,
+                     mapping = aes(x = NMDS1,
+                                   y = NMDS2),
+                     group=gg_heat$Heat.Treatment) +
+                ylab("NDMS Axis 2") +
+                xlab("NMDS Axis 1") +
+                theme_classic() +
+                theme(text = element_text(size = 16), 
+                      axis.text = element_text(colour = "black"),
+                      legend.title=element_blank(),
+                      legend.position = "top") + 
+                geom_segment(aes(x=mean.x, 
+                                 y=mean.y, 
+                                 xend=NMDS1, 
+                                 yend=NMDS2,
+                               col = Heat.Treatment), 
+                               alpha = 0.2) +
+                geom_point(mapping = aes(col = Heat.Treatment),
+                           size = 3) +
+                geom_point(aes(x=mean.x, 
+                               y=mean.y,
+                               col = Heat.Treatment),
+                           size=6) +
+                scale_shape_manual(values = c(1,2)) +
+                scale_linetype_manual(values = c(1,5)) +
+                scale_colour_viridis_d(end = 0.8,begin = 0.3,
+                                       option = "inferno") + 
+                scale_y_continuous(n.breaks = 6) + 
+                scale_x_continuous(n.breaks = 7)
+
+# group by predator treatments for plotting
+gg_pred<-merge(data.scores_Invert,
+               aggregate(cbind(mean.x=NMDS1,
+                               mean.y=NMDS2)~Pred.Treatment,
+                data.scores_Invert,
+                mean),
+               by="Pred.Treatment")
+
+Invert_plot2<-ggplot(data = gg_pred,
+                     mapping = aes(x = NMDS1,
+                                   y = NMDS2),
+                     group=gg_pred$Pred.Treatment) +
+                ylab("NDMS Axis 2") +
+                xlab("NMDS Axis 1") +
+                theme_classic() +
+                theme(text = element_text(size = 16), 
+                      axis.text = element_text(colour = "black"),
+                      legend.title=element_blank(),
+                      legend.position = "top") + 
+                geom_segment(aes(x=mean.x, 
+                                 y=mean.y, 
+                                 xend=NMDS1, 
+                                 yend=NMDS2),
+                             col = "black",
+                             alpha = 0.2) +
+                geom_point(mapping = aes(shape = Pred.Treatment),
+                            col = "black",
+                           size = 3) +
+                geom_point(aes(x=mean.x, 
+                               y=mean.y,
+                               shape = Pred.Treatment),
+                           col = "black",
+                           size=6) +
+                scale_shape_manual(values = c(16,17)) +
+                scale_linetype_manual(values = c(1,5)) +
+                scale_colour_viridis_d(end = 0.8,begin = 0.3,
+                                       option = "inferno") + 
+                scale_y_continuous(n.breaks = 6) + 
+                scale_x_continuous(n.breaks = 7)
+
+```
+
+**Treatment effects on richness**
+
+Now we'll ask how predator and heatwave treatment affected macroinvertebrate richness:
+
+```{r}
+
+##-- End of recovery period --##
+# hist(C.Comp$`Total Richness`) # assess normality (not run)
+summary(aov(C.Comp$`Total Richness`~C.Comp$Pred.Treatment*C.Comp$Heat.Treatment)) # run anova
+# plot(aov(C.Comp$`Total Richness`~C.Comp$Pred.Treatment*C.Comp$Heat.Treatment)) # check assumption of homoscedacity (not run)
+TukeyHSD(aov(C.Comp$`Total Richness`~C.Comp$Pred.Treatment*C.Comp$Heat.Treatment)) # Tukey's HSD post-hoc test checks significance of group differences
+
+```
+
+Now we'll plot treatment effects on macroinvertebrate richness (Figure S1).
+
+```{r}
+
+ggplot(data = C.Comp,
+       mapping = aes(x = C.Comp$Pred.Treatment,
+                     y = C.Comp$`Total Richness`),
+       group=C.Comp$Heat.Treatment) +
+  ylab("Total macroinvertebrate richness") + 
+  xlab("Predator treatment") + 
+  theme_classic() +
+  theme(text = element_text(size = 16), 
+        axis.text = element_text(colour = "black"),
+        legend.title=element_blank(), 
+        strip.background = element_blank()) + 
+  geom_point(mapping = aes(shape = Pred.Treatment),
+             position = position_jitter(width = 0.25), 
+             size = 2,
+             show.legend = FALSE) + 
+  geom_boxplot(mapping = aes(fill = Heat.Treatment),
+               alpha = 0.6,
+               show.legend = FALSE) +
+  facet_grid(. ~ C.Comp$Heat.Treatment,
+             scales = 'fixed') + 
+  ylim(4,max(C.Comp$`Total Richness`)+1) + 
+  scale_shape_manual(values = c(16,17),
+                     guide=FALSE) +
+  scale_fill_viridis_d(end = 0.8,begin = 0.3,
+                         option = "inferno")
+
+```
+
+**Treatment effects on density**
+
+Now we'll ask how predator and heatwave treatment affected macroinvertebrate density. Note that our mesocosms are 3.5 L in volume, so we will divide total abunance by 3500 to get the density of our macroinvertebrates per cubic cm:
+
+```{r}
+
+##-- End of recovery period --##
+# hist(C.Comp$`Total Abundance`/3500) # assess normality (not run)
+summary(aov((C.Comp$`Total Abundance`/3500)~C.Comp$Pred.Treatment*C.Comp$Heat.Treatment)) # run anova
+# plot(aov((C.Comp$`Total Abundance`/3500)~C.Comp$Pred.Treatment*C.Comp$Heat.Treatment)) # check assumption of homoscedacity (not run)
+TukeyHSD(aov((C.Comp$`Total Abundance`/3500)~C.Comp$Pred.Treatment*C.Comp$Heat.Treatment)) # Tukey's HSD post-hoc test checks significance of group differences
+
+```
+
+Plot results for multipanel figure:
+
+```{r}
+
+Invert_plot3<-ggplot(data = C.Comp,
+                     mapping = aes(x = C.Comp$Pred.Treatment,
+                                   y = C.Comp$`Total Abundance`/3500),
+                     group=C.Comp$Heat.Treatment) +
+                ylab("Macroinvertebrate Density (cm^3)") + 
+                xlab("Predator treatment") + 
+                theme_classic() +
+                theme(text = element_text(size = 16), 
+                      axis.text = element_text(colour = "black"),
+                      legend.title=element_blank(), 
+                      strip.background = element_blank()) + 
+                geom_point(mapping = aes(shape = Pred.Treatment),
+                           position = position_jitter(width = 0.25), 
+                           size = 2,
+                           show.legend = FALSE) + 
+                geom_boxplot(mapping = aes(fill = Heat.Treatment),
+                             alpha = 0.6,
+                             show.legend = FALSE) +
+                facet_grid(. ~ C.Comp$Heat.Treatment,
+                           scales = 'fixed') + 
+                ylim(0,0.06) + 
+                scale_shape_manual(values = c(16,17),
+                                   guide=FALSE) +
+                scale_fill_viridis_d(end = 0.8,begin = 0.3,
+                                       option = "inferno")
+
+```
+
+
+## Leaf litter processing
+
+Finally, let's test for treatment effects on leaf litter processing. We'll test both microbial degradation and leaf shredding by macroinvertebrates.
+
+**Treatment effects on microbial degradation**
+
+First convert treatments to factors: 
+
+```{r}
+
+# convert to factor for plotting and analysis
+Leaf$Pred.Treatment<-parse_factor(x = as.character(Leaf$Pred.Treatment),
+                                    ordered = T,
+                                    include_na = F,
+                                    levels = c("Present","Absent"))
+
+Leaf$Heat.Treatment<-parse_factor(x = as.character(Leaf$Heat.Treatment),
+                                    ordered = T,
+                                    include_na = F,
+                                    levels = c("Ambient","Current","Future"))
+
+```
+
+Then analyse treatment effects on microbial degradation:
+
+```{r}
+
+##-- End of recovery period --##
+
+# hist(log10(Leaf$micro.degred.factor)) # assess normality (not run)
+summary(aov(log10(Leaf$micro.degred.factor)~Leaf$Pred.Treatment*Leaf$Heat.Treatment))
+# plot(aov(log10(Leaf$micro.degred.factor)~Leaf$Pred.Treatment*Leaf$Heat.Treatment)) # check assumption of homoscedacity (not run)
+
+```
+
+Plot results: 
+
+```{r}
+
+ggplot(data = Leaf,
+       mapping = aes(x = Leaf$Pred.Treatment,
+                     y = Leaf$micro.degred.factor),
+       group=Leaf$Heat.Treatment) +
+  ylab("Microbial leaf degradation (mg)") + 
+  xlab("Predator treatment") + 
+  theme_classic() +
+  theme(text = element_text(size = 16), 
+        axis.text = element_text(colour = "black"),
+        legend.title=element_blank(), 
+        strip.background = element_blank()) + 
+  geom_point(mapping = aes(shape = Pred.Treatment),
+             position = position_jitter(width = 0.25), 
+             size = 2,
+             show.legend = FALSE) + 
+  geom_boxplot(mapping = aes(fill = Heat.Treatment),
+               alpha = 0.6,
+               show.legend = FALSE) +
+  facet_grid(. ~ Leaf$Heat.Treatment,
+             scales = 'fixed') + 
+  ylim(0,max(Leaf$micro.degred.factor)+0.005) + 
+  scale_shape_manual(values = c(16,17),
+                     guide=FALSE) +
+  scale_fill_viridis_d(end = 0.8,begin = 0.3,
+                         option = "inferno")
+
+```
+
+**Treatment effects on macroinvertebrate shredding**
+
+So finally we'll test for treatment effects on leaf shredding by macroinvertebrates, using our corrected values (accounting for microbial degradation; see Methods):
+
+```{r}
+
+##-- End of recovery period --##
+
+# hist(Leaf$Corrected.shred)  # assess normality (not run)
+summary(aov(Leaf$Corrected.shred~Leaf$Pred.Treatment*Leaf$Heat.Treatment)) # run anova
+# plot(aov(Leaf$Corrected.shred~Leaf$Pred.Treatment*Leaf$Heat.Treatment)) # check assumption of homoscedacity (not run)
+TukeyHSD(aov(Leaf$Corrected.shred~Leaf$Pred.Treatment*Leaf$Heat.Treatment)) # Tukey's HSD post-hoc test checks significance of group differences
+
+```
+
+Plot for multipanel figure:
+
+```{r}
+
+Invert_plot4<-ggplot(data = Leaf,
+                     mapping = aes(x = Leaf$Pred.Treatment,
+                                   y = Leaf$Corrected.shred),
+                     group=Leaf$Heat.Treatment) +
+                ylab("Leaf litter processing (mg)") + 
+                xlab("Predator treatment") + 
+                theme_classic() +
+                theme(text = element_text(size = 16), 
+                      axis.text = element_text(colour = "black"),
+                      legend.title=element_blank(), 
+                      strip.background = element_blank()) + 
+                geom_point(mapping = aes(shape = Pred.Treatment),
+                           position = position_jitter(width = 0.25), 
+                           size = 2,
+                           show.legend = FALSE) + 
+                geom_boxplot(mapping = aes(fill = Heat.Treatment),
+                             alpha = 0.6,
+                             show.legend = FALSE) +
+                facet_grid(. ~ Leaf$Heat.Treatment,
+                           scales = 'fixed') + 
+                ylim(0,max(Leaf$Corrected.shred)+0.05) + 
+                scale_shape_manual(values = c(16,17),
+                                   guide=FALSE) +
+                scale_fill_viridis_d(end = 0.8,begin = 0.3,
+                                       option = "inferno")
+
+```
+
+
+**Multipanel figure**
+
+And last but by no means least, here's the multipanel Figure 3. On the left we have the significant predator and heatwave effects on macroinvertebrate composition, and on the right we have treatment effects on macroinvertebrate density and leaf litter processing: 
+
+```{r}
+
+(Invert_plot1 + Invert_plot3) / (Invert_plot2 + Invert_plot4)
+
+```
+
+~Fin~
