@@ -24,8 +24,6 @@ require(scales)
 Bentho<-read_csv('Data/Algae time series.csv',col_names = T)
 C.Comp<-read_csv('Data/Macroinvertebrates.csv',col_names = T)
 Leaf<-read_csv('Data/Leaf litter.csv',col_names = T)
-Treat96<-read_csv('Data/Treatments_96.csv',col_names = T)
-Treat140<-read_csv('Data/Treatments_140.csv',col_names = T)
 
 ##-- pre-process data --##
 
@@ -73,7 +71,7 @@ We'll start by looking for treatment effects on algal biomass and functional tem
 
 **Mean values**
 
-First, we'll use the mean of our tiles within each measocosm to look for treatment effects on algal biomass and temporal variability. Then later we'll compare the tiles within mesocosms as our measure of spatial variability. 
+First, we'll use the mean of our tiles within each mesocosm to look for treatment effects on algal biomass and temporal variability. Then later we'll compare the tiles within mesocosms as our measure of spatial variability. 
 
 ```{r}
 
