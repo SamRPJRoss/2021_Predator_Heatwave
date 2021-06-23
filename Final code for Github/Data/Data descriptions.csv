@@ -1,0 +1,58 @@
+﻿Algae time series.csv,
+Date,Date of measurement in dd/mm/yyyy
+Cyano,Chlorophyll a concentration in wavelengths representing cyanobacteria (see Methods)
+Green.Algae,Chlorophyll a concentration in wavelengths representing green algae (see Methods)
+Diatoms,Chlorophyll a concentration in wavelengths representing diatoms (see Methods)
+Total.Conc,"Total Chlorophyll a concentration (NB: this is the sum of Cyano, Green.Algae, and Diatoms)"
+Mesocosm.No,ID code (1-48) for the mesocosm in which a measurement was taken
+Pred.Treatment,ID code for predator treatment (Present or Absent)
+Heat.Treatment,"ID code for heatwave treatment (Ambient, Current, or Future)"
+Treatment,"ID code for unique predator x heatwave treatments (1-6: 1 = Present x Future, 2 = Absent x Future, 3 = Present x Current, 4 = Absent x Current, 5 = Present x Ambient, 6 = Absent x Ambient)"
+Rep,"ID code for mesocosm and terracotta tile (N.1, N.2, N.3) from which measurement was taken"
+Period,"ID code for the period of the experiment (Intitial for pre-disturbance, Heatwave for during heatwave, Recovery for post-heatwave, Ambient for control treatment)"
+,
+Leaf litter.csv,
+Mesocosm.No,ID code (1-48) for the mesocosm in which a measurement was taken
+Pred.Treatment,ID code for predator treatment (Present or Absent)
+Heat.Treatment,"ID code for heatwave treatment (Ambient, Current, or Future)"
+Treatment,"ID code for unique predator x heatwave treatments (1-6: 1 = Present x Future, 2 = Absent x Future, 3 = Present x Current, 4 = Absent x Current, 5 = Present x Ambient, 6 = Absent x Ambient)"
+Rep,"ID code for mesocosm and terracotta tile (N.1, N.2, N.3) from which measurement was taken"
+Initial.Big,Intitial mass (g) on Day 20 of dried leaves in larger mesh bag - allowing macroinvertebrate access
+Final.Big,Final mass (g) on Day 49 of dried leaves in larger mesh bag - allowing macroinvertebrate access
+Change.Big,Change in mass (g) in the large bag between Day 20 and 49 (Intial.Big - Final.Big)
+Initial.Small,Intitial mass (g) on Day 20 of dried leaves in smaller mesh bag - excluding macroinvertebrate access
+Final.Small,Final mass (g) on Day 49 of dried leaves in smaller mesh bag - excluding macroinvertebrate access
+Change.small,Change in mass (g) in the small bag between Day 20 and 49 (Intial.Small - Final.Small)
+micro.degred.factor,Proportional change in mass (g) in small bag between Day 20 and 49 (Change.small/Initial.Small)
+Corrected.shred,"Change in mass (g) in the large bag between Day 20 and 49, accounting for expected microbial degradation in big bag (Change.Big-(Intial.Big x micro.degred.factor))"
+,
+Macroinvertebrates.csv,
+Mesocosm.No,ID code (1-48) for the mesocosm in which a measurement was taken
+Pred.Treatment,ID code for predator treatment (Present or Absent)
+Heat.Treatment,"ID code for heatwave treatment (Ambient, Current, or Future)"
+Treatment,"ID code for unique predator x heatwave treatments (1-6: 1 = Present x Future, 2 = Absent x Future, 3 = Present x Current, 4 = Absent x Current, 5 = Present x Ambient, 6 = Absent x Ambient)"
+Rep,"ID code for mesocosm and terracotta tile (N.1, N.2, N.3) from which measurement was taken"
+Sternomoera yezoensis,Number of individuals of S. yezoensis present in mesocosm
+Cochliopidae spp.,Number of individuals of Cochliopidae sp. present in mesocosm
+Optioservus kubotai,Number of individuals of O. kubotai present in mesocosm
+Orthocladiinae spp.,Number of individuals of Orthocladiinae sp. present in mesocosm
+Orthocladiinae spp. pupae,Number of individuals of Orthocladiinae sp. pupae present in mesocosm
+Chironomidae spp. A,Number of individuals of Chironomidae sp. A present in mesocosm
+Chironomidae spp. B,Number of individuals of Chironomidae sp. B present in mesocosm
+Tipula coquilletti,Number of individuals of T. coquilletti present in mesocosm
+Baetis thermicus,Number of individuals of B. thermicus present in mesocosm
+Ephemera strigata,Number of individuals of E. strigata present in mesocosm
+Biwadrilidae spp.,Number of individuals of Biwadrilidae sp. present in mesocosm
+Hirudinea spp.,Number of individuals of Hirudinea sp. present in mesocosm
+Nematoda spp.,Number of individuals of Nematoda  sp. present in mesocosm
+Davidius nanus,Number of individuals of D. nanus  present in mesocosm
+Perlodidae spp.,Number of individuals of Perlodidae sp. present in mesocosm
+Brachycentrus americanus,Number of individuals of B. americanus present in mesocosm
+Psychomyia spp.,Number of individuals of Psychomyia sp. present in mesocosm
+Rhyacophila nigrocephala,Number of individuals of R. nigrocephala present in mesocosm
+Neophylax japonicus,Number of individuals of N. japonicus present in mesocosm
+Total Richness,Number of different species/morphotypes present in mesocosm
+Total Abundance,Number of individuals of all species/morphotypes present in mesocosm
+Sorter ID,Initials of person who sorted invertebrates from mesocosms on Day 50
+Note,ID notes
+Treat.Name,Named unique treatment ID for use in community composition analysis

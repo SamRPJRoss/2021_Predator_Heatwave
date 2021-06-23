@@ -1155,8 +1155,8 @@ First, let's generate the Bray-Curtis dissimilarity between mesocosms in terms o
 
 # get a suitable community matrix
 Invert<-as.data.frame(C.Comp) # convert to dataframe
-rownames(Invert)<-as.character(Invert[,33]) # set rownames as unique mesocosm IDs
-Invert<-Invert[,c(-1:-5,-25:-33)] # remove all but the species abundance columns
+rownames(Invert)<-as.character(Invert[,29]) # set rownames as unique mesocosm IDs
+Invert<-Invert[,c(-1:-5,-25:-29)] # remove all but the species abundance columns
 Invert<-decostand(Invert, method = "total") # convert abundance to relative abundance
 
 # run an NMDS on the relative abundance data
@@ -1334,7 +1334,7 @@ ggplot(data = C.Comp,
        mapping = aes(x = C.Comp$Pred.Treatment,
                      y = C.Comp$`Total Richness`),
        group=C.Comp$Heat.Treatment) +
-  ylab("Total macroinvertebrate richness") + 
+  ylab("Macroinvertebrate taxon richness") + 
   xlab("Predator treatment") + 
   theme_classic() +
   theme(text = element_text(size = 16), 
@@ -1360,15 +1360,15 @@ ggplot(data = C.Comp,
 
 **Treatment effects on density**
 
-Now we'll ask how predator and heatwave treatment affected macroinvertebrate density. Note that our mesocosms are 3.5 L in volume, so we will divide total abunance by 3500 to get the density of our macroinvertebrates per cubic cm:
+Now we'll ask how predator and heatwave treatment affected macroinvertebrate density. Note that our mesocosms are 3.5 L in volume, so we will divide total abundance by 35 to get the density of our macroinvertebrates per cubic meter:
 
 ```{r}
 
 ##-- End of recovery period --##
-# hist(C.Comp$`Total Abundance`/3500) # assess normality (not run)
-summary(aov((C.Comp$`Total Abundance`/3500)~C.Comp$Pred.Treatment*C.Comp$Heat.Treatment)) # run anova
-# plot(aov((C.Comp$`Total Abundance`/3500)~C.Comp$Pred.Treatment*C.Comp$Heat.Treatment)) # check assumption of homoscedacity (not run)
-TukeyHSD(aov((C.Comp$`Total Abundance`/3500)~C.Comp$Pred.Treatment*C.Comp$Heat.Treatment)) # Tukey's HSD post-hoc test checks significance of group differences
+# hist(C.Comp$`Total Abundance`/35) # assess normality (not run)
+summary(aov((C.Comp$`Total Abundance`/35)~C.Comp$Pred.Treatment*C.Comp$Heat.Treatment)) # run anova
+# plot(aov((C.Comp$`Total Abundance`/35)~C.Comp$Pred.Treatment*C.Comp$Heat.Treatment)) # check assumption of homoscedacity (not run)
+TukeyHSD(aov((C.Comp$`Total Abundance`/35)~C.Comp$Pred.Treatment*C.Comp$Heat.Treatment)) # Tukey's HSD post-hoc test checks significance of group differences
 
 ```
 
@@ -1378,9 +1378,9 @@ Plot results for multipanel figure:
 
 Invert_plot3<-ggplot(data = C.Comp,
                      mapping = aes(x = C.Comp$Pred.Treatment,
-                                   y = C.Comp$`Total Abundance`/3500),
+                                   y = C.Comp$`Total Abundance`/35),
                      group=C.Comp$Heat.Treatment) +
-                ylab("Macroinvertebrate Density (cm^3)") + 
+                ylab("Macroinvertebrate Density 100 (cm^3)") + 
                 xlab("Predator treatment") + 
                 theme_classic() +
                 theme(text = element_text(size = 16), 
@@ -1396,7 +1396,7 @@ Invert_plot3<-ggplot(data = C.Comp,
                              show.legend = FALSE) +
                 facet_grid(. ~ C.Comp$Heat.Treatment,
                            scales = 'fixed') + 
-                ylim(0,0.06) + 
+                ylim(0,6) + 
                 scale_shape_manual(values = c(16,17),
                                    guide=FALSE) +
                 scale_fill_viridis_d(end = 0.8,begin = 0.3,
@@ -1464,7 +1464,7 @@ ggplot(data = Leaf,
                show.legend = FALSE) +
   facet_grid(. ~ Leaf$Heat.Treatment,
              scales = 'fixed') + 
-  ylim(0,max(Leaf$micro.degred.factor)+0.005) + 
+  ylim(min(Leaf$micro.degred.factor)-0.005,max(Leaf$micro.degred.factor)+0.005) + 
   scale_shape_manual(values = c(16,17),
                      guide=FALSE) +
   scale_fill_viridis_d(end = 0.8,begin = 0.3,
@@ -1474,7 +1474,7 @@ ggplot(data = Leaf,
 
 **Treatment effects on macroinvertebrate shredding**
 
-So finally we'll test for treatment effects on leaf shredding by macroinvertebrates, using our corrected values (accounting for microbial degradation; see Methods):
+So finally we'll test for treatment effects on leaf shredding by macroinvertebrates, using our corrected values (accounting for microbial degradation, where negative values indicate an interaction between macroinvertebrate and microbial breakdown; see Methods):
 
 ```{r}
 
@@ -1511,7 +1511,7 @@ Invert_plot4<-ggplot(data = Leaf,
                              show.legend = FALSE) +
                 facet_grid(. ~ Leaf$Heat.Treatment,
                            scales = 'fixed') + 
-                ylim(0,max(Leaf$Corrected.shred)+0.05) + 
+                ylim(min(Leaf$Corrected.shred)-0.02,max(Leaf$Corrected.shred)+0.02) + 
                 scale_shape_manual(values = c(16,17),
                                    guide=FALSE) +
                 scale_fill_viridis_d(end = 0.8,begin = 0.3,
