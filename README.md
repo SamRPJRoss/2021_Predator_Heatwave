@@ -1,4 +1,5 @@
 # 2021_Predator_Heatwave
+<a href="https://zenodo.org/badge/latestdoi/377191442"><img src="https://zenodo.org/badge/377191442.svg" alt="DOI"></a>
 
 R code and data from Ross et al. (under review).
 
